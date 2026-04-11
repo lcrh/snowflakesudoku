@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snowflake Sudoku</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --primary: #0ea5e9;
+            --accent: #06b6d4;
+            --surface: #f8fafc;
+            --surface-dark: #1e293b;
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --error: #ef4444;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --surface: #0f172a;
+                --text-primary: #f1f5f9;
+                --text-secondary: #cbd5e1;
+                --border: #334155;
+            }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 95%, var(--primary) 5%) 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; }
+
+        header { text-align: center; margin-bottom: 3rem; }
+        h1 {
+            font-size: 3rem; font-weight: 200; letter-spacing: -2px; margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .subtitle { color: var(--text-secondary); font-size: 1rem; font-weight: 300; }
+
+        .main-grid {
+            display: grid; grid-template-columns: 1fr 350px; gap: 2rem; margin-bottom: 3rem;
+        }
+        @media (max-width: 1024px) { .main-grid { grid-template-columns: 1fr; } }
+
+        .puzzle-board {
+            background: white; border-radius: 16px; padding: 2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 4px 12px rgba(14, 165, 233, 0.08);
+            border: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center; min-height: 600px;
+        }
+        @media (prefers-color-scheme: dark) {
+            .puzzle-board { background: var(--surface-dark); }
+        }
+
+        #puzzleContainer { width: 100%; max-width: 700px; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; }
+        svg { width: 100%; height: 100%; }
+
+        .hex-cell { cursor: pointer; transition: fill 0.2s ease, stroke 0.2s ease; stroke: #666; stroke-width: 1.5; fill: #fafafa; }
+        .hex-cell:hover { stroke: #0ea5e9; }
+        .hex-cell.given { fill: #f0f0f0; }
+        .hex-cell.empty { fill: #ffffff; }
+        .hex-cell.selected { fill: #bfdbfe; stroke: #0ea5e9; stroke-width: 2; }
+        .hex-cell.invalid { fill: #fecaca; stroke: #ef4444; stroke-width: 2; }
+
+        .hex-text {
+            font-size: 24px; font-weight: 800; text-anchor: middle; dominant-baseline: middle;
+            pointer-events: none; user-select: none; fill: #0f172a;
+            paint-order: stroke; stroke: white; stroke-width: 0.3px;
+        }
+        .hex-text.given { font-weight: 900; fill: #000; }
+
+        @media (prefers-color-scheme: dark) {
+            .hex-cell { stroke: #aaa; fill: #222; }
+            .hex-cell.given { fill: #333; }
+            .hex-cell.empty { fill: #1a1a1a; }
+            .hex-text { fill: #f1f5f9; }
+        }
+
+        .sidebar { display: flex; flex-direction: column; gap: 1.5rem; }
+
+        .card {
+            background: white; border-radius: 12px; padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid var(--border);
+        }
+        @media (prefers-color-scheme: dark) { .card { background: var(--surface-dark); } }
+
+        .card h3 {
+            font-size: 0.875rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 1px; color: var(--text-secondary); margin-bottom: 1rem;
+        }
+
+        .status {
+            padding: 1rem; border-radius: 8px; font-size: 0.9rem; font-weight: 500;
+            text-align: center; transition: all 0.3s ease;
+        }
+        .status.solved { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); border: 1px solid color-mix(in srgb, var(--success) 30%, transparent); }
+        .status.incomplete { background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent); }
+        .status.invalid { background: color-mix(in srgb, var(--error) 15%, transparent); color: var(--error); border: 1px solid color-mix(in srgb, var(--error) 30%, transparent); }
+
+        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.85rem; }
+        .stat { padding: 0.75rem; background: color-mix(in srgb, var(--primary) 5%, transparent); border-radius: 6px; border-left: 3px solid var(--primary); }
+        .stat-label { color: var(--text-secondary); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem; }
+        .stat-value { font-size: 1.25rem; font-weight: 600; color: var(--primary); }
+
+        .button-group { display: flex; flex-direction: column; gap: 0.75rem; }
+        button {
+            padding: 0.75rem 1rem; border: none; border-radius: 8px; font-size: 0.9rem;
+            font-weight: 600; cursor: pointer; transition: all 0.2s ease;
+            text-transform: uppercase; letter-spacing: 0.5px; font-family: inherit;
+        }
+        .btn-primary { background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%); color: white; box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3); }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4); }
+        .btn-secondary { background: color-mix(in srgb, var(--primary) 10%, transparent); color: var(--primary); border: 1px solid var(--border); }
+        .btn-secondary:hover { background: color-mix(in srgb, var(--primary) 15%, transparent); }
+
+        .input-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+        .input-btn { padding: 0.5rem; background: color-mix(in srgb, var(--primary) 10%, transparent); color: var(--primary); border: 1px solid var(--border); font-weight: 600; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; }
+        .input-btn:hover { background: var(--primary); color: white; transform: scale(1.05); }
+        .input-btn.clear { grid-column: 1 / -1; background: color-mix(in srgb, var(--error) 10%, transparent); color: var(--error); }
+        .input-btn.clear:hover { background: var(--error); color: white; }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 2rem; }
+            .puzzle-board { padding: 1rem; }
+            .stats { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Snowflake Sudoku</h1>
+            <p class="subtitle">Solve hexagonal puzzles with elegant constraints</p>
+        </header>
+
+        <div class="main-grid">
+            <div class="puzzle-board">
+                <div id="puzzleContainer"></div>
+            </div>
+
+            <div class="sidebar">
+                <div class="card">
+                    <h3>Status</h3>
+                    <div id="status" class="status incomplete">Loading puzzle...</div>
+                </div>
+
+                <div class="card">
+                    <h3>Input</h3>
+                    <div class="input-grid" id="inputGrid"></div>
+                </div>
+
+                <div class="card">
+                    <h3>Stats</h3>
+                    <div class="stats">
+                        <div class="stat"><div class="stat-label">Topology</div><div class="stat-value" id="topology">-</div></div>
+                        <div class="stat"><div class="stat-label">Givens</div><div class="stat-value" id="givens">-</div></div>
+                        <div class="stat"><div class="stat-label">Cells</div><div class="stat-value" id="cells">-</div></div>
+                        <div class="stat"><div class="stat-label">Filled</div><div class="stat-value" id="filled">0</div></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Controls</h3>
+                    <div class="button-group">
+                        <button class="btn-primary" onclick="newPuzzle()">New Puzzle</button>
+                        <button class="btn-secondary" onclick="showSolution()">Show Solution</button>
+                        <button class="btn-secondary" onclick="resetPuzzle()">Reset</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Data ---
+        let allPuzzles = [];
+        let currentPuzzle = null;  // full puzzle record including topology
+        let currentState = [];
+        let selectedCell = null;
+        let cellToElement = {};
+
+        const HEX_SIZE = 90;
+        const DIRECTION_TO_IDX = { NE: 0, E: 1, SE: 2, SW: 3, W: 4, NW: 5 };
+
+        // --- Geometry ---
+        function hexToCartesian(q, r) {
+            return {
+                x: HEX_SIZE * (3/2 * q),
+                y: HEX_SIZE * (Math.sqrt(3)/2 * q + Math.sqrt(3) * r),
+            };
+        }
+
+        function trianglePoints(hexX, hexY, triIdx) {
+            const angle = (Math.PI / 3) * triIdx;
+            const v1 = { x: hexX + HEX_SIZE * Math.cos(angle),               y: hexY + HEX_SIZE * Math.sin(angle) };
+            const v2 = { x: hexX + HEX_SIZE * Math.cos(angle + Math.PI / 3), y: hexY + HEX_SIZE * Math.sin(angle + Math.PI / 3) };
+            const center = { x: (hexX + v1.x + v2.x) / 3, y: (hexY + v1.y + v2.y) / 3 };
+            return { points: `${hexX},${hexY} ${v1.x},${v1.y} ${v2.x},${v2.y}`, center };
+        }
+
+        // --- Validation (pure JS, no server) ---
+        function validate(state, constraints) {
+            let valid = true;
+            for (const { cells } of constraints) {
+                const seen = new Set();
+                for (const idx of cells) {
+                    const v = state[idx];
+                    if (v >= 1 && v <= 6) {
+                        if (seen.has(v)) { valid = false; break; }
+                        seen.add(v);
+                    }
+                }
+                if (!valid) break;
+            }
+            const complete = state.every(v => v >= 1 && v <= 6);
+            return { valid, complete, solved: valid && complete };
+        }
+
+        // --- Rendering ---
+        function drawPuzzle() {
+            const topo = currentPuzzle.topology;
+            const container = document.getElementById('puzzleContainer');
+            container.innerHTML = '';
+            cellToElement = {};
+
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', '-600 -400 1200 800');
+            svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+            for (let cellIdx = 0; cellIdx < topo.n_cells; cellIdx++) {
+                const pos = topo.cell_positions[cellIdx];
+                const { x: hexX, y: hexY } = hexToCartesian(pos.q, pos.r);
+                const { points, center } = trianglePoints(hexX, hexY, DIRECTION_TO_IDX[pos.direction]);
+
+                const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                polygon.setAttribute('points', points);
+                polygon.setAttribute('class', 'hex-cell');
+                svg.appendChild(polygon);
+
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', center.x);
+                text.setAttribute('y', center.y);
+                text.setAttribute('class', 'hex-text');
+                svg.appendChild(text);
+
+                polygon.text = text;
+                cellToElement[cellIdx] = polygon;
+
+                polygon.addEventListener('click', () => {
+                    if (currentPuzzle.puzzle[cellIdx] === 7) {
+                        selectedCell = selectedCell === cellIdx ? null : cellIdx;
+                        updateCellRendering();
+                        updateInputGrid();
+                    }
+                });
+            }
+
+            container.appendChild(svg);
+            updateCellRendering();
+        }
+
+        function updateCellRendering() {
+            const { valid, complete } = validate(currentState, currentPuzzle.topology.constraints);
+            // Mark violated cells
+            const violatedCells = new Set();
+            if (!valid) {
+                for (const { cells } of currentPuzzle.topology.constraints) {
+                    const vals = cells.map(i => currentState[i]).filter(v => v >= 1 && v <= 6);
+                    if (new Set(vals).size !== vals.length) cells.forEach(i => violatedCells.add(i));
+                }
+            }
+
+            Object.entries(cellToElement).forEach(([idx, elem]) => {
+                idx = parseInt(idx);
+                const value = currentState[idx];
+                const isGiven = currentPuzzle.puzzle[idx] !== 7;
+                const isSelected = selectedCell === idx;
+                const isInvalid = violatedCells.has(idx);
+
+                elem.setAttribute('class', 'hex-cell ' +
+                    (isInvalid ? 'invalid' : isSelected ? 'selected' : isGiven ? 'given' : 'empty'));
+
+                elem.text.textContent = (value && value !== 7) ? value : '';
+                elem.text.setAttribute('class', 'hex-text' + (isGiven ? ' given' : ''));
+            });
+
+            updateStatus(validate(currentState, currentPuzzle.topology.constraints));
+        }
+
+        function updateStatus({ valid, complete, solved }) {
+            const el = document.getElementById('status');
+            if (solved)        { el.textContent = '✓ Puzzle Solved!';          el.className = 'status solved'; }
+            else if (!valid)   { el.textContent = '✗ Constraint Violation';    el.className = 'status invalid'; }
+            else               { el.textContent = '○ Incomplete';              el.className = 'status incomplete'; }
+        }
+
+        function updateInputGrid() {
+            const grid = document.getElementById('inputGrid');
+            grid.innerHTML = '';
+            if (selectedCell === null) {
+                grid.innerHTML = '<p style="color:var(--text-secondary);font-size:0.9rem">Select a cell to edit</p>';
+                return;
+            }
+            for (let i = 1; i <= 6; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'input-btn';
+                btn.textContent = i;
+                btn.onclick = () => fillCell(i);
+                grid.appendChild(btn);
+            }
+            const clearBtn = document.createElement('button');
+            clearBtn.className = 'input-btn clear';
+            clearBtn.textContent = 'Clear';
+            clearBtn.onclick = () => fillCell(7);
+            grid.appendChild(clearBtn);
+        }
+
+        function updateStats() {
+            const topo = currentPuzzle.topology;
+            const filled = currentState.filter(v => v >= 1 && v <= 6).length;
+            const hexCount = currentPuzzle.n;
+            const constraintCount = topo.constraints.length;
+            document.getElementById('topology').textContent = `n=${hexCount} (${constraintCount}✕)`;
+            document.getElementById('givens').textContent = currentPuzzle.givens;
+            document.getElementById('cells').textContent = topo.n_cells;
+            document.getElementById('filled').textContent = filled;
+        }
+
+        // --- Actions ---
+        function fillCell(value) {
+            if (selectedCell === null || currentPuzzle.puzzle[selectedCell] !== 7) return;
+            currentState[selectedCell] = value;
+            updateCellRendering();
+            updateStats();
+        }
+
+        function loadPuzzle(puzzle) {
+            currentPuzzle = puzzle;
+            currentState = [...puzzle.puzzle];
+            selectedCell = null;
+            drawPuzzle();
+            updateInputGrid();
+            updateStats();
+        }
+
+        function newPuzzle() {
+            loadPuzzle(allPuzzles[Math.floor(Math.random() * allPuzzles.length)]);
+        }
+
+        function showSolution() {
+            if (!currentPuzzle) return;
+            currentState = [...currentPuzzle.solution];
+            selectedCell = null;
+            updateCellRendering();
+            updateStats();
+        }
+
+        function resetPuzzle() {
+            if (!currentPuzzle) return;
+            currentState = [...currentPuzzle.puzzle];
+            selectedCell = null;
+            updateCellRendering();
+            updateStats();
+        }
+
+        // --- Init ---
+        fetch('puzzles.json')
+            .then(r => r.json())
+            .then(data => {
+                allPuzzles = data;
+                newPuzzle();
+            });
+    </script>
+</body>
+</html>

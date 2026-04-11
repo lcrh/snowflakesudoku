@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snowflake-sudoku"
+version = "0.1.0"
+description = "Parametric hexagonal sudoku — puzzle generator, topology engine, and interactive static frontend"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Snowflake Sudoku Contributors"}
+]
+keywords = ["sudoku", "hexagonal", "puzzle", "generator", "constraint-solving"]
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/snowflake-sudoku"
+Documentation = "https://github.com/yourusername/snowflake-sudoku#readme"
+Repository = "https://github.com/yourusername/snowflake-sudoku"
+Issues = "https://github.com/yourusername/snowflake-sudoku/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["snowflake*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
