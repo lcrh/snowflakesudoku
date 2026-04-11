@@ -85,6 +85,44 @@
             .hex-text { fill: #f1f5f9; }
         }
 
+        @keyframes flashYellow {
+            0% { fill: #fef08a; }
+            50% { fill: #fef08a; }
+            100% { fill: #ffffff; }
+        }
+
+        .hex-cell.flash { animation: flashYellow 0.6s ease-out; }
+
+        /* Modal/Popover styles */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+
+        .modal {
+            background: white; border-radius: 12px; padding: 2rem; max-width: 500px;
+            width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            position: relative;
+        }
+        @media (prefers-color-scheme: dark) { .modal { background: var(--surface-dark); } }
+
+        .modal-close {
+            position: absolute; top: 1rem; right: 1rem; background: none; border: none;
+            font-size: 1.5rem; cursor: pointer; color: var(--text-secondary); padding: 0; width: 40px; height: 40px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal-close:hover { color: var(--text-primary); }
+
+        .modal h2 { font-size: 1.5rem; margin-bottom: 1.5rem; color: var(--text-primary); }
+        .modal h3 { font-size: 1rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--text-primary); }
+        .modal p, .modal li { color: var(--text-secondary); line-height: 1.6; margin-bottom: 0.75rem; }
+        .modal ul { margin-left: 1.5rem; }
+        .modal code {
+            background: var(--surface-light); padding: 0.2rem 0.5rem; border-radius: 4px;
+            font-family: monospace; font-size: 0.9rem; color: var(--primary);
+        }
+
         .sidebar { display: flex; flex-direction: column; gap: 1.5rem; }
 
         .card {
@@ -138,8 +176,13 @@
 <body>
     <div class="container">
         <header>
-            <h1>Snowflake Sudoku</h1>
-            <p class="subtitle">all puzzles are unique</p>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
+                <div>
+                    <h1>Snowflake Sudoku</h1>
+                    <p class="subtitle">all puzzles are unique</p>
+                </div>
+                <button id="infoBtn" onclick="openInstructions()" style="background: var(--primary); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">?</button>
+            </div>
             <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 1rem;">
                 192 puzzles on web •
                 <a href="https://github.com/santolucito/snowflakesudoku" style="color: var(--primary); text-decoration: none; border-bottom: 1px solid var(--primary);">∞ puzzles on GitHub</a>
@@ -185,10 +228,53 @@
                     <div class="button-group">
                         <button class="btn-primary" onclick="newPuzzle()">New Puzzle</button>
                         <button class="btn-secondary" onclick="showSolution()">Show Solution</button>
+                        <button class="btn-secondary" onclick="helpRevealCell()">Help (reveal 1)</button>
                         <button class="btn-secondary" onclick="resetPuzzle()">Reset</button>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Instructions Modal -->
+    <div id="instructionsModal" class="modal-overlay" onclick="closeInstructions(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeInstructions()">×</button>
+            <h2>How to Play</h2>
+
+            <h3>The Puzzle</h3>
+            <p>Snowflake Sudoku is a hexagonal variant where:</p>
+            <ul>
+                <li>Each hexagon contains <strong>6 triangular cells</strong></li>
+                <li>Fill each cell with digits <strong>1–6</strong></li>
+                <li>Each hexagon must contain exactly <strong>one of each digit</strong></li>
+                <li><strong>Meeting points</strong> (where 6 hexagons meet) also form constraints</li>
+            </ul>
+
+            <h3>Playing</h3>
+            <ul>
+                <li><strong>Click a cell</strong> to select it (it will turn blue)</li>
+                <li><strong>Type 1–6</strong> on your keyboard to fill it</li>
+                <li>Or <strong>click the digit buttons</strong> on the right</li>
+                <li><strong>Press 0, Backspace, or Delete</strong> to clear a cell</li>
+            </ul>
+
+            <h3>Constraints</h3>
+            <ul>
+                <li><strong>Red cells</strong> mean you've violated a constraint—fix them!</li>
+                <li>The status panel shows your progress</li>
+            </ul>
+
+            <h3>Getting Help</h3>
+            <ul>
+                <li><strong>Help (reveal 1)</strong> – Reveals one unrevealed cell (flashes yellow so you know which one)</li>
+                <li><strong>Show Solution</strong> – Reveals the entire solution</li>
+                <li><strong>Reset</strong> – Start over with just the given cells</li>
+            </ul>
+
+            <h3>More Puzzles</h3>
+            <p>Choose from 192 unique puzzles in the <strong>Puzzle</strong> dropdown. Each topology (size n) has multiple difficulty variants based on the number of given cells.</p>
+            <p style="margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-secondary);">Every puzzle is guaranteed to have exactly one solution! 🎯</p>
         </div>
     </div>
 
@@ -388,6 +474,57 @@
             updateCellRendering();
             updateStats();
         }
+
+        function helpRevealCell() {
+            if (!currentPuzzle) return;
+
+            // Find an empty cell that hasn't been filled yet
+            let unrevealedCell = -1;
+            for (let i = 0; i < currentState.length; i++) {
+                if (currentPuzzle.puzzle[i] === 7 && currentState[i] === 7) {
+                    unrevealedCell = i;
+                    break;
+                }
+            }
+
+            if (unrevealedCell === -1) {
+                alert('All cells revealed! Solve the puzzle to complete.');
+                return;
+            }
+
+            // Reveal the cell with the solution value
+            currentState[unrevealedCell] = currentPuzzle.solution[unrevealedCell];
+            updateCellRendering();
+
+            // Flash the revealed cell yellow
+            const element = cellToElement[unrevealedCell];
+            if (element) {
+                element.classList.remove('flash');
+                // Force reflow to restart animation
+                void element.offsetWidth;
+                element.classList.add('flash');
+            }
+
+            updateStats();
+        }
+
+        function openInstructions() {
+            document.getElementById('instructionsModal').classList.add('open');
+        }
+
+        function closeInstructions(event) {
+            // Allow closing by clicking outside the modal or on the close button
+            if (!event || event.target === document.getElementById('instructionsModal')) {
+                document.getElementById('instructionsModal').classList.remove('open');
+            }
+        }
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeInstructions();
+            }
+        });
 
         function loadPuzzleByCode(code) {
             if (!code) return;
