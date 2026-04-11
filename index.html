@@ -426,7 +426,16 @@
             .then(data => {
                 allPuzzles = data;
                 populatePuzzleSelector();
-                newPuzzle();
+
+                // Check for puzzle parameter in URL
+                const params = new URLSearchParams(window.location.search);
+                const puzzleCode = params.get('puzzle');
+
+                if (puzzleCode) {
+                    loadPuzzleByCode(puzzleCode);
+                } else {
+                    newPuzzle();
+                }
             });
     </script>
 </body>
