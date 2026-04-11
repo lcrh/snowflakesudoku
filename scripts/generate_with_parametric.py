@@ -5,11 +5,17 @@ import subprocess
 import json
 import random
 import sys
+import string
 from pathlib import Path
 
 # Import parametric topology
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from snowflake.parametric_topology import build_snowflake
+
+def generate_puzzle_code(rng):
+    """Generate a 3-character alphanumeric puzzle code."""
+    chars = string.ascii_uppercase + string.digits
+    return ''.join(rng.choice(chars) for _ in range(3))
 
 def generate_smt_model(constraints, n_cells):
     """Generate SMT-LIB2 model for snowflake sudoku with given constraints."""
@@ -234,14 +240,20 @@ if __name__ == "__main__":
                 solution, constraints, n_cells, target, args.cvc5, rng
             )
 
-            puzzles.append({
+            givens_count = sum(1 for v in puzzle if v != 7)
+            code = generate_puzzle_code(rng)
+            puzzle_record = {
+                "id": i,
+                "code": f"{code}-{args.n}-{givens_count}",
                 "n": args.n,
                 "n_cells": n_cells,
                 "puzzle": puzzle,
                 "solution": solution,
-                "givens": sum(1 for v in puzzle if v != 7)
-            })
-            print(f"  ✓ Created unique puzzle with {puzzles[-1]['givens']} givens ({removed_count} cells removed)")
+                "givens": givens_count
+            }
+            puzzles.append(puzzle_record)
+            print(f"  ✓ Created unique puzzle with {givens_count} givens ({removed_count} cells removed)")
+            print(f"    Code: {puzzle_record['code']}")
         else:
             print("  Failed to generate puzzle")
 
