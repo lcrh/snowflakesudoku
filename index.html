@@ -394,6 +394,8 @@
             const puzzle = allPuzzles.find(p => p.code === code);
             if (puzzle) {
                 loadPuzzle(puzzle);
+                // Update URL to reflect selected puzzle
+                window.history.pushState({puzzle: code}, '', `?puzzle=${code}`);
             }
         }
 
