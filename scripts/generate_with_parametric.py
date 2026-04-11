@@ -172,6 +172,79 @@ def is_unique(constraints, n_cells, solution, given_set, cvc5_path):
         return False
 
 
+def create_minimal_puzzle(solution, constraints, n_cells, cvc5_path, rng):
+    """Find the minimal puzzle with a unique solution.
+
+    Iteratively removes cells while maintaining uniqueness.
+    Continues until no more cells can be removed without losing uniqueness.
+
+    Returns (puzzle, min_givens, removed_indices) where removed_indices
+    are the cells that can be removed while maintaining uniqueness.
+    """
+    # Start with all cells as givens
+    given = set(range(n_cells))
+
+    # Randomize the order in which we try to remove cells
+    removal_order = list(range(n_cells))
+    rng.shuffle(removal_order)
+
+    removed = []
+    for cell_idx in removal_order:
+        # Try removing this cell
+        given.discard(cell_idx)
+
+        # Check if the puzzle is still uniquely solvable
+        if not is_unique(constraints, n_cells, solution, given, cvc5_path):
+            # Not unique - restore this cell as a given
+            given.add(cell_idx)
+        else:
+            # Unique - keep it removed
+            removed.append(cell_idx)
+
+    # Build the minimal puzzle
+    puzzle = [solution[i] if i in given else 7 for i in range(n_cells)]
+    return puzzle, len(given), removed
+
+
+def create_puzzle_variants(solution, constraints, n_cells, min_givens, removed_indices, rng):
+    """Create puzzle variants with increasing difficulty from minimal.
+
+    Takes the minimal puzzle and creates harder versions by adding back
+    some of the removed cells (fewer removed = more givens).
+
+    Returns list of (puzzle, givens_count) tuples, easiest to hardest.
+    """
+    variants = []
+
+    # Start with minimal puzzle (all removable cells removed)
+    min_puzzle = [solution[i] if i not in removed_indices else 7 for i in range(n_cells)]
+    variants.append((min_puzzle, min_givens))
+
+    # Create progressively harder versions
+    remaining_removed = list(removed_indices)
+    rng.shuffle(remaining_removed)
+
+    # Add back cells in chunks to create intermediate difficulties
+    step_size = max(1, len(remaining_removed) // 4)  # Create ~4 levels
+    added_back = 0
+
+    while added_back < len(remaining_removed):
+        # Add back the next chunk
+        chunk_end = min(added_back + step_size, len(remaining_removed))
+        cells_to_add = set(remaining_removed[added_back:chunk_end])
+        added_back = chunk_end
+
+        # Build puzzle with these cells added back
+        puzzle = [solution[i] if i not in (set(remaining_removed) - cells_to_add) else 7
+                  for i in range(n_cells)]
+        givens = sum(1 for v in puzzle if v != 7)
+
+        if givens > min_givens:  # Only add if it's actually harder
+            variants.append((puzzle, givens))
+
+    return variants
+
+
 def create_unique_puzzle(solution, constraints, n_cells, target_givens, cvc5_path, rng):
     """Create a puzzle by iteratively removing cells while checking uniqueness.
 
@@ -213,54 +286,77 @@ def create_unique_puzzle(solution, constraints, n_cells, target_givens, cvc5_pat
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate snowflake sudoku puzzles with parametric topology and uniqueness guarantee")
-    parser.add_argument("--n", type=int, default=1, help="Topology parameter (1=single hexagon, 2=two hexagons)")
-    parser.add_argument("--count", type=int, default=3, help="Number of puzzles to generate")
-    parser.add_argument("--output", type=str, default="puzzle_generation_output.json", help="Output file")
+    parser.add_argument("--n-min", type=int, default=1, help="Minimum topology parameter")
+    parser.add_argument("--n-max", type=int, default=19, help="Maximum topology parameter")
+    parser.add_argument("--count", type=int, default=1, help="Number of base puzzles per topology size")
+    parser.add_argument("--variants", type=int, default=3, help="Number of difficulty variants per base puzzle (minimal + harder)")
+    parser.add_argument("--output", type=str, default="puzzles_large.json", help="Output file")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--cvc5", type=str, default="cvc5", help="Path to CVC5 binary (default: assume on PATH)")
-    parser.add_argument("--target-givens", type=int, default=None, help="Target number of givens (default: 60% of cells)")
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
 
-    print(f"Generating {args.count} snowflake sudoku puzzles (n={args.n})...\n")
+    print(f"Generating snowflake sudoku puzzles (n={args.n_min} to {args.n_max})...\n")
+    print(f"Base puzzles: {args.count} per size")
+    print(f"Variants per base: {args.variants} (minimal + harder versions)")
     print(f"Uniqueness guarantee: ON (iterative progressive removal with CVC5 checking)\n")
 
     puzzles = []
-    for i in range(args.count):
-        print(f"\nPuzzle {i+1}:")
-        solution, n_cells, constraints = generate_puzzle(args.n, rng, args.cvc5)
+    puzzle_id = 0
 
-        if solution and n_cells and constraints:
-            # Determine target givens
-            target = args.target_givens if args.target_givens else max(3, int(n_cells * 0.6))
+    for n in range(args.n_min, args.n_max + 1):
+        print(f"\n{'='*60}")
+        print(f"Topology n={n}:")
+        print(f"{'='*60}")
 
-            print(f"Ensuring unique solution (target: ~{target} givens)...")
-            puzzle, actual_givens, removed_count = create_unique_puzzle(
-                solution, constraints, n_cells, target, args.cvc5, rng
+        for base_idx in range(args.count):
+            print(f"\nBase puzzle {base_idx+1}/{args.count}:")
+            solution, n_cells, constraints = generate_puzzle(n, rng, args.cvc5)
+
+            if not (solution and n_cells and constraints):
+                print(f"  Failed to generate puzzle")
+                continue
+
+            print(f"  Finding minimal unique puzzle ({n_cells} cells)...")
+            min_puzzle, min_givens, removed = create_minimal_puzzle(
+                solution, constraints, n_cells, args.cvc5, rng
             )
 
-            givens_count = sum(1 for v in puzzle if v != 7)
-            code = generate_puzzle_code(rng)
-            puzzle_record = {
-                "id": i,
-                "code": f"{code}-{args.n}-{givens_count}",
-                "n": args.n,
-                "n_cells": n_cells,
-                "puzzle": puzzle,
-                "solution": solution,
-                "givens": givens_count
-            }
-            puzzles.append(puzzle_record)
-            print(f"  ✓ Created unique puzzle with {givens_count} givens ({removed_count} cells removed)")
-            print(f"    Code: {puzzle_record['code']}")
-        else:
-            print("  Failed to generate puzzle")
+            print(f"  ✓ Found minimal puzzle: {min_givens} givens")
 
-    # Save to JSON for manual inspection
+            # Create variants with different difficulties
+            print(f"  Creating {args.variants} difficulty variants...")
+            variants = create_puzzle_variants(solution, constraints, n_cells, min_givens, removed, rng)
+
+            # Limit to requested number of variants
+            variants = variants[:args.variants]
+
+            for var_idx, (puzzle, givens) in enumerate(variants):
+                code = generate_puzzle_code(rng)
+                puzzle_record = {
+                    "id": puzzle_id,
+                    "code": f"{code}-{n}-{givens}",
+                    "n": n,
+                    "n_cells": n_cells,
+                    "puzzle": puzzle,
+                    "solution": solution,
+                    "givens": givens
+                }
+                puzzles.append(puzzle_record)
+                puzzle_id += 1
+
+                difficulty_label = "minimal" if var_idx == 0 else f"harder({var_idx})"
+                print(f"    • {puzzle_record['code']} ({givens} givens) - {difficulty_label}")
+
+    # Save to JSON
     output_file = Path(args.output)
     with open(output_file, "w") as f:
         json.dump(puzzles, f, indent=2)
 
-    print(f"\n✓ Generated {len(puzzles)} unique puzzles")
+    print(f"\n{'='*60}")
+    print(f"✓ Generated {len(puzzles)} total puzzles")
+    print(f"  {len([p for p in puzzles if 'minimal' in str(p)])} base (minimal)")
+    print(f"  {len(puzzles)} total with variants")
     print(f"  Saved to {output_file}")
+    print(f"{'='*60}")
