@@ -7,6 +7,7 @@ import random
 import sys
 import string
 from pathlib import Path
+from multiprocessing import Pool
 
 # Import parametric topology
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -283,6 +284,74 @@ def create_unique_puzzle(solution, constraints, n_cells, target_givens, cvc5_pat
 
     return puzzle, len(given), removed_count
 
+
+def generate_base_puzzles_for_task(task_args):
+    """Generate one base puzzle and its variants for a single task.
+
+    Used by multiprocessing pool. Each worker generates one base puzzle
+    and creates multiple variants with different difficulties.
+
+    Args:
+        task_args: (n, base_idx, seed_base, cvc5_path, num_variants)
+
+    Returns:
+        List of puzzle records (base puzzle + all variants)
+    """
+    n, base_idx, seed_base, cvc5_path, num_variants = task_args
+
+    # Create unique RNG for this task
+    rng = random.Random(seed_base + n * 1000 + base_idx * 100)
+
+    # Generate initial solution
+    solution, n_cells, constraints = generate_puzzle(n, rng, cvc5_path)
+
+    if not (solution and n_cells and constraints):
+        return []
+
+    # Find minimal unique puzzle
+    min_puzzle, min_givens, removed = create_minimal_puzzle(
+        solution, constraints, n_cells, cvc5_path, rng
+    )
+
+    # Create variants with different difficulties
+    variants = create_puzzle_variants(solution, constraints, n_cells, min_givens, removed, rng)
+    variants = variants[:num_variants]
+
+    # Generate one code for all variants of this base puzzle
+    base_code = generate_puzzle_code(rng)
+
+    # Track givens counts to add variant suffixes if needed
+    givens_counts = {}
+    for puzzle, givens in variants:
+        if givens not in givens_counts:
+            givens_counts[givens] = 0
+        givens_counts[givens] += 1
+
+    # Create puzzle records
+    puzzle_records = []
+    for var_idx, (puzzle, givens) in enumerate(variants):
+        # Add suffix only if there are multiple puzzles with this givens count
+        if givens_counts[givens] > 1:
+            suffix_idx = sum(1 for g in [v[1] for v in variants[:var_idx]] if g == givens)
+            suffix = chr(ord('a') + suffix_idx)
+            code = f"{base_code}-{n}-{givens}{suffix}"
+        else:
+            code = f"{base_code}-{n}-{givens}"
+
+        puzzle_record = {
+            "n": n,
+            "base_idx": base_idx,
+            "var_idx": var_idx,
+            "code": code,
+            "n_cells": n_cells,
+            "puzzle": puzzle,
+            "solution": solution,
+            "givens": givens
+        }
+        puzzle_records.append(puzzle_record)
+
+    return puzzle_records
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate snowflake sudoku puzzles with parametric topology and uniqueness guarantee")
@@ -293,89 +362,68 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default="puzzles_large.json", help="Output file")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--cvc5", type=str, default="cvc5", help="Path to CVC5 binary (default: assume on PATH)")
+    parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers (default: 4)")
+    parser.add_argument("--force", action="store_true", help="Force regeneration even if output file exists")
     args = parser.parse_args()
 
-    rng = random.Random(args.seed)
+    # Check if output file already exists
+    output_file = Path(args.output)
+    if output_file.exists() and not args.force:
+        with open(output_file, "r") as f:
+            try:
+                existing = json.load(f)
+                print(f"Output file '{args.output}' already exists with {len(existing)} puzzles.")
+                print(f"Use --force to regenerate, or delete the file to start fresh.")
+                sys.exit(0)
+            except json.JSONDecodeError:
+                print(f"Output file exists but is invalid JSON. Regenerating...")
+                pass
 
     print(f"Generating snowflake sudoku puzzles (n={args.n_min} to {args.n_max})...\n")
     print(f"Base puzzles: {args.count} per size")
     print(f"Variants per base: {args.variants} (minimal + harder versions)")
+    print(f"Parallel workers: {args.workers}")
     print(f"Uniqueness guarantee: ON (iterative progressive removal with CVC5 checking)\n")
 
-    puzzles = []
-    puzzle_id = 0
-
+    # Create list of all tasks: (n, base_idx, seed_base, cvc5_path, num_variants)
+    tasks = []
     for n in range(args.n_min, args.n_max + 1):
-        print(f"\n{'='*60}")
-        print(f"Topology n={n}:")
-        print(f"{'='*60}")
-
         for base_idx in range(args.count):
-            print(f"\nBase puzzle {base_idx+1}/{args.count}:")
-            solution, n_cells, constraints = generate_puzzle(n, rng, args.cvc5)
+            tasks.append((n, base_idx, args.seed, args.cvc5, args.variants))
 
-            if not (solution and n_cells and constraints):
-                print(f"  Failed to generate puzzle")
-                continue
+    print(f"Total tasks: {len(tasks)} (puzzles to generate)")
+    print(f"Estimated final count: {len(tasks) * args.variants} (with variants)\n")
 
-            print(f"  Finding minimal unique puzzle ({n_cells} cells)...")
-            min_puzzle, min_givens, removed = create_minimal_puzzle(
-                solution, constraints, n_cells, args.cvc5, rng
-            )
+    # Generate puzzles in parallel
+    print("Starting parallel generation...")
+    with Pool(processes=args.workers) as pool:
+        results = pool.map(generate_base_puzzles_for_task, tasks)
 
-            print(f"  ✓ Found minimal puzzle: {min_givens} givens")
+    # Flatten results and sort by n, base_idx, var_idx for consistent ordering
+    all_puzzle_records = []
+    for result in results:
+        all_puzzle_records.extend(result)
 
-            # Create variants with different difficulties
-            print(f"  Creating {args.variants} difficulty variants...")
-            variants = create_puzzle_variants(solution, constraints, n_cells, min_givens, removed, rng)
+    # Sort by n, base_idx, var_idx to maintain order
+    all_puzzle_records.sort(key=lambda p: (p["n"], p["base_idx"], p["var_idx"]))
 
-            # Limit to requested number of variants
-            variants = variants[:args.variants]
-
-            # Generate one code for all variants of this base puzzle
-            base_code = generate_puzzle_code(rng)
-
-            # Track givens counts to add variant suffixes if needed
-            givens_counts = {}
-            for puzzle, givens in variants:
-                if givens not in givens_counts:
-                    givens_counts[givens] = 0
-                givens_counts[givens] += 1
-
-            # Create variant suffixes: a, b, c, etc. for puzzles with same givens
-            for var_idx, (puzzle, givens) in enumerate(variants):
-                # Add suffix only if there are multiple puzzles with this givens count
-                if givens_counts[givens] > 1:
-                    # Find which variant this is (0, 1, 2...)
-                    suffix_idx = sum(1 for g in [v[1] for v in variants[:var_idx]] if g == givens)
-                    suffix = chr(ord('a') + suffix_idx)
-                    code = f"{base_code}-{n}-{givens}{suffix}"
-                else:
-                    code = f"{base_code}-{n}-{givens}"
-
-                puzzle_record = {
-                    "id": puzzle_id,
-                    "code": code,
-                    "n": n,
-                    "n_cells": n_cells,
-                    "puzzle": puzzle,
-                    "solution": solution,
-                    "givens": givens
-                }
-                puzzles.append(puzzle_record)
-                puzzle_id += 1
-
-                difficulty_label = "minimal" if var_idx == 0 else f"harder({var_idx})"
-                print(f"    • {puzzle_record['code']} ({givens} givens) - {difficulty_label}")
+    # Add final puzzle IDs
+    puzzles = []
+    for puzzle_id, record in enumerate(all_puzzle_records):
+        record["id"] = puzzle_id
+        # Remove temporary sorting keys
+        del record["base_idx"]
+        del record["var_idx"]
+        puzzles.append(record)
 
     # Save to JSON
-    output_file = Path(args.output)
     with open(output_file, "w") as f:
         json.dump(puzzles, f, indent=2)
 
     print(f"\n{'='*60}")
     print(f"✓ Generated {len(puzzles)} total puzzles")
-    print(f"  {len([p for p in puzzles if 'minimal' in str(p)])} base (minimal)")
-    print(f"  {len(puzzles)} total with variants")
+    print(f"  Topologies: n={args.n_min} to n={args.n_max}")
+    print(f"  Base puzzles: {args.count} per topology")
+    print(f"  Variants: {args.variants} per base")
     print(f"  Saved to {output_file}")
     print(f"{'='*60}")

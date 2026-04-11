@@ -2,6 +2,8 @@
 
 A parametric hexagonal sudoku puzzle generator with an interactive static web interface. Generate valid puzzles at any scale — from single hexagons to complex multi-ring topologies — and solve them in a beautiful, minimalist web app.
 
+**Play online:** https://www.marksantolucito.com/snowflakesudoku/
+
 ## What is Snowflake Sudoku?
 
 Snowflake sudoku is a hexagonal variant where:
@@ -12,6 +14,8 @@ Snowflake sudoku is a hexagonal variant where:
 
 The geometry is built parametrically using **axial coordinates** (q, r) on an infinite hexagonal grid. This means we can generate valid puzzles of any complexity without manual coordination.
 
+![Snowflake Sudoku puzzle interface](puzzle-screenshot.png)
+
 ## Quick Start
 
 ### 1. Start the Static Site
@@ -19,7 +23,6 @@ The geometry is built parametrically using **axial coordinates** (q, r) on an in
 The puzzle interface is a self-contained HTML file. No server setup needed:
 
 ```bash
-cd static
 python3 -m http.server 8080
 ```
 
@@ -27,14 +30,16 @@ Then open **http://localhost:8080** in your browser. You'll see an interactive h
 
 ### 2. Solve a Puzzle
 
-- **Click a cell** to select it
-- **Use the digit buttons** (1–6) to fill the cell
+- **Click a cell** to select it (or use direct link: `?puzzle=CODE`)
+- **Use keyboard** (1–6) or click digit buttons to fill the cell
+- **Clear cells** with 0, Backspace, or Delete
 - **Watch real-time validation** — the status panel shows:
   - **Topology**: current puzzle's size (n value + constraint count)
   - **Givens**: pre-filled cells
   - **Cells**: total/filled/empty
 - **Errors appear in red** — violated constraints highlight automatically
 - **Solve it!** — press "New Puzzle" for a random puzzle, "Show Solution" to reveal the answer
+- **Share puzzles** — your selected puzzle appears in the URL for easy sharing
 
 ## File Structure
 
@@ -42,6 +47,7 @@ Then open **http://localhost:8080** in your browser. You'll see an interactive h
 snowflake-sudoku/
 ├── README.md                          # This file
 ├── pyproject.toml                     # Project metadata (Python ≥3.10)
+├── index.html                         # Interactive web puzzle solver (root level)
 ├── snowflake/
 │   ├── __init__.py                    # Package marker
 │   └── parametric_topology.py         # Topology engine (the core library)
@@ -49,7 +55,6 @@ snowflake-sudoku/
 │   ├── generate_with_parametric.py    # Generate puzzles via CVC5
 │   └── export_static.py               # Export to static/puzzles.json
 ├── static/
-│   ├── index.html                     # Interactive web puzzle solver
 │   └── puzzles.json                   # Puzzle dataset (loaded by browser)
 ├── puzzles_source.json                # Source puzzle data (for regeneration)
 └── tests/
@@ -97,17 +102,19 @@ Refresh the browser — it'll load your new puzzles.
 
 ## Topology Scaling
 
-The system supports **any n value** (number of hexagons):
+The system supports **any n value** (number of hexagons). Current dataset includes:
 
-| n | Hexagons | Cells | Constraints | Complexity |
-|---|----------|-------|-------------|-----------|
-| 1 | 1 | 6 | 1 | Trivial |
-| 2 | 2 | 12 | 2 | Very easy |
-| 4 | 4 | 24 | 6 | Easy |
-| 7 | 7 | 42 | 13 | Medium (ring 1 complete) |
-| 13 | 13 | 78 | 27 | Hard (ring 2 complete) |
-| 19 | 19 | 114 | 43 | Very hard |
-| ∞ | ∞ | ∞ | ∞ | Unlimited |
+| n | Hexagons | Cells | Constraints | Puzzles | Complexity |
+|---|----------|-------|-------------|---------|-----------|
+| 4 | 4 | 24 | 6 | 12 | Easy |
+| 5 | 5 | 30 | 8 | 12 | Easy–Medium |
+| 7 | 7 | 42 | 13 | 12 | Medium |
+| 10 | 10 | 60 | 19 | 12 | Medium–Hard |
+| 13 | 13 | 78 | 27 | 12 | Hard (ring 2 complete) |
+| 19 | 19 | 114 | 43 | 12 | Very hard |
+| ∞ | ∞ | ∞ | ∞ | ∞ | Unlimited |
+
+**Dataset summary**: 192 puzzles total (12 per topology size, n=4 to n=19)
 
 Topologies are generated automatically using a **hexagonal ring algorithm**:
 - Ring 0: center (0, 0)
@@ -138,16 +145,31 @@ Each constraint is a list of cell indices that must contain distinct digits 1–
 
 ### 2. Puzzle Generation (`scripts/generate_with_parametric.py`)
 
-Uses **CVC5** (an SMT solver) to generate valid solutions:
+Uses **CVC5** (an SMT solver) to generate valid solutions with **guaranteed uniqueness**:
 
 1. Build topology with `build_snowflake(n)`
 2. Generate SMT-LIB model encoding all constraints
-3. Call CVC5 to find a satisfying assignment
-4. Remove ~60% of cells randomly to create the puzzle
+3. Call CVC5 to find a satisfying assignment (the solution)
+4. **Iterative progressive removal**: 
+   - Start with all cells as givens
+   - Try removing each cell in shuffled order
+   - For each cell, check if the puzzle remains uniquely solvable (using a blocking clause SMT query)
+   - Keep the cell removed if unique, restore it if removing breaks uniqueness
+   - Stop once no more cells can be removed without breaking uniqueness (minimal puzzle)
+5. Create harder variants by progressively adding back removed cells
+
+This guarantees each puzzle has exactly one valid solution. The algorithm uses ~O(n_cells) CVC5 calls per puzzle.
 
 ```bash
 python scripts/generate_with_parametric.py --n 7 --count 10 --output puzzles.json
 ```
+
+Puzzle codes use the format `CODE-SIZE-GIVENS` (e.g., `VGF-4-13`):
+- **CODE**: 3-letter alphanumeric puzzle ID
+- **SIZE**: topology parameter n
+- **GIVENS**: number of pre-filled cells
+
+When multiple difficulty variants exist with the same givens, they get suffixes: `VGF-4-15a`, `VGF-4-15b`, etc.
 
 ### 3. Static Export (`scripts/export_static.py`)
 
@@ -211,16 +233,15 @@ python scripts/generate_with_parametric.py --n 100 --count 1 --output huge.json
 
 ### Change Puzzle Difficulty
 
-Adjust the givens percentage in `generate_with_parametric.py`:
+The `--variants` flag controls how many difficulty levels are generated from each base puzzle:
 
-```python
-def create_puzzle_from_solution(solution, n_cells, num_givens=None):
-    if num_givens is None:
-        num_givens = max(3, int(n_cells * 0.6))  # 60% givens → ~40% empty
-    # ...
+```bash
+python scripts/generate_with_parametric.py --n 7 --count 5 --variants 4
 ```
 
-Lower percentage = harder puzzle (fewer givens).
+This generates 5 base puzzles with 4 variants each (minimal + 3 progressively easier versions).
+
+The minimal puzzle has the absolute fewest givens where the solution is still unique. Variants add back removed cells to create easier versions, all guaranteed unique.
 
 ### Customize the Frontend
 
@@ -271,13 +292,22 @@ Status updates in real-time
 
 MIT (or match parent project if part of a larger system).
 
+## Features Implemented
+
+- ✓ Guaranteed unique solutions (iterative progressive removal with CVC5)
+- ✓ Parametric topology (any n value, no hardcoded limits)
+- ✓ Minimal puzzle generation with difficulty variants
+- ✓ Keyboard input (1–6, 0, Backspace, Delete)
+- ✓ URL parameter sharing (?puzzle=CODE)
+- ✓ Real-time constraint validation
+- ✓ Static site (no backend, no dependencies)
+
 ## Future Ideas
 
 - Difficulty ratings (easy/medium/hard based on solution search depth)
 - Leaderboard & timing
 - Hint system (constraint propagation suggestions)
 - Dark mode toggle
-- Keyboard input (1–6 keys)
 - Undo/redo with history
 - Export as image or PDF
 - Multiplayer mode
