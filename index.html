@@ -421,7 +421,7 @@
         }
 
         // --- Init ---
-        fetch('puzzles.json')
+        fetch('static/puzzles.json')
             .then(r => r.json())
             .then(data => {
                 allPuzzles = data;
