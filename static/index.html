@@ -154,6 +154,14 @@
                 </div>
 
                 <div class="card">
+                    <h3>Puzzle</h3>
+                    <select id="puzzleSelector" onchange="loadPuzzleByCode(this.value)" style="width: 100%; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: white; color: var(--text-primary); font-size: 0.9rem;">
+                        <option value="">Select a puzzle...</option>
+                    </select>
+                    <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem;">Code • Size • Givens</p>
+                </div>
+
+                <div class="card">
                     <h3>Input</h3>
                     <div class="input-grid" id="inputGrid"></div>
                 </div>
@@ -350,6 +358,11 @@
             drawPuzzle();
             updateInputGrid();
             updateStats();
+            // Update selector to show current puzzle
+            const selector = document.getElementById('puzzleSelector');
+            if (puzzle.code) {
+                selector.value = puzzle.code;
+            }
         }
 
         function newPuzzle() {
@@ -372,11 +385,43 @@
             updateStats();
         }
 
+        function loadPuzzleByCode(code) {
+            if (!code) return;
+            const puzzle = allPuzzles.find(p => p.code === code);
+            if (puzzle) {
+                loadPuzzle(puzzle);
+            }
+        }
+
+        function populatePuzzleSelector() {
+            const selector = document.getElementById('puzzleSelector');
+            // Group by n for better organization
+            const byN = {};
+            for (const p of allPuzzles) {
+                if (!byN[p.n]) byN[p.n] = [];
+                byN[p.n].push(p);
+            }
+
+            // Add grouped options
+            for (const n of Object.keys(byN).sort((a, b) => parseInt(a) - parseInt(b))) {
+                const group = document.createElement('optgroup');
+                group.label = `Size n=${n} (${n * 6} cells)`;
+                for (const puzzle of byN[n]) {
+                    const option = document.createElement('option');
+                    option.value = puzzle.code;
+                    option.textContent = `${puzzle.code} • ${puzzle.givens} givens`;
+                    group.appendChild(option);
+                }
+                selector.appendChild(group);
+            }
+        }
+
         // --- Init ---
         fetch('puzzles.json')
             .then(r => r.json())
             .then(data => {
                 allPuzzles = data;
+                populatePuzzleSelector();
                 newPuzzle();
             });
     </script>

@@ -30,7 +30,7 @@ def export(input_path: Path, output_path: Path) -> None:
         hex_coords = HEX_COORDS_BY_N[n]
         cell_positions = get_cell_positions(n)
 
-        puzzles.append({
+        puzzle_record = {
             "id": i,
             "n": n,
             "puzzle": p["puzzle"],
@@ -42,7 +42,13 @@ def export(input_path: Path, output_path: Path) -> None:
                 "cell_positions": cell_positions,
                 "constraints": [{"cells": c} for c in constraints],
             },
-        })
+        }
+
+        # Preserve code field if it exists
+        if "code" in p:
+            puzzle_record["code"] = p["code"]
+
+        puzzles.append(puzzle_record)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
