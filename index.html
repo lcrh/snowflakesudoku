@@ -438,6 +438,23 @@
                 } else {
                     newPuzzle();
                 }
+
+                // Keyboard input support
+                document.addEventListener('keydown', (e) => {
+                    if (selectedCell === null) return; // No cell selected
+
+                    // Numbers 1-6 fill the cell
+                    const num = parseInt(e.key);
+                    if (num >= 1 && num <= 6) {
+                        e.preventDefault();
+                        fillCell(num);
+                    }
+                    // Backspace/Delete/0 clears the cell
+                    else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') {
+                        e.preventDefault();
+                        fillCell(7);
+                    }
+                });
             });
     </script>
 </body>
