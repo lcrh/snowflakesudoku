@@ -332,11 +332,30 @@ if __name__ == "__main__":
             # Limit to requested number of variants
             variants = variants[:args.variants]
 
+            # Generate one code for all variants of this base puzzle
+            base_code = generate_puzzle_code(rng)
+
+            # Track givens counts to add variant suffixes if needed
+            givens_counts = {}
+            for puzzle, givens in variants:
+                if givens not in givens_counts:
+                    givens_counts[givens] = 0
+                givens_counts[givens] += 1
+
+            # Create variant suffixes: a, b, c, etc. for puzzles with same givens
             for var_idx, (puzzle, givens) in enumerate(variants):
-                code = generate_puzzle_code(rng)
+                # Add suffix only if there are multiple puzzles with this givens count
+                if givens_counts[givens] > 1:
+                    # Find which variant this is (0, 1, 2...)
+                    suffix_idx = sum(1 for g in [v[1] for v in variants[:var_idx]] if g == givens)
+                    suffix = chr(ord('a') + suffix_idx)
+                    code = f"{base_code}-{n}-{givens}{suffix}"
+                else:
+                    code = f"{base_code}-{n}-{givens}"
+
                 puzzle_record = {
                     "id": puzzle_id,
-                    "code": f"{code}-{n}-{givens}",
+                    "code": code,
                     "n": n,
                     "n_cells": n_cells,
                     "puzzle": puzzle,
