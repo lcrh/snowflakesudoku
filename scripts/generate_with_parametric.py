@@ -63,14 +63,25 @@ def parse_model(output, n_cells):
 
     return solution
 
-def generate_puzzle(n, rng, cvc5_path, topology_seed=None):
+def generate_puzzle(n, rng, cvc5_path, hex_coords=None, topology_seed=None):
     """Generate a single valid puzzle using CVC5 and parametric topology.
 
-    Returns (solution, n_cells, constraints) or (None, None, None) on failure.
+    Returns (solution, n_cells, constraints, hex_coords) or
+    (None, None, None, None) on failure.
+
+    Prefer an explicit ``hex_coords`` list so the recorded layout matches the
+    constraints used to solve the puzzle. ``topology_seed`` remains as a
+    convenience for callers that have not resolved coordinates yet.
     """
 
     print(f"Building topology for n={n}...")
-    constraints, n_cells = build_snowflake(n, topology_seed=topology_seed)
+    if hex_coords is not None and topology_seed is not None:
+        raise ValueError("pass either hex_coords or topology_seed, not both")
+    if hex_coords is None:
+        hex_coords = get_hex_coords(n, topology_seed=topology_seed)
+    else:
+        hex_coords = [(int(q), int(r)) for q, r in hex_coords]
+    constraints, n_cells = build_snowflake(n, hex_coords)
 
     print(f"  Cells: {n_cells}, Constraints: {len(constraints)}")
     print(f"Generating SMT model...")
@@ -90,7 +101,7 @@ def generate_puzzle(n, rng, cvc5_path, topology_seed=None):
 
         if "sat" not in output:
             print(f"CVC5: unsatisfiable")
-            return None, None, None
+            return None, None, None, None
 
         # Parse the solution
         solution = parse_model(output, n_cells)
@@ -101,18 +112,18 @@ def generate_puzzle(n, rng, cvc5_path, topology_seed=None):
 
         if all(v in range(1, 7) for v in solution):
             print(f"✓ Found valid solution: {solution[:20]}...")
-            return solution, n_cells, constraints
+            return solution, n_cells, constraints, hex_coords
         else:
             print(f"✗ Solution has invalid values: {set(solution)}")
             print(f"  Sample: {solution[:20]}")
-            return None, None, None
+            return None, None, None, None
 
     except subprocess.TimeoutExpired:
         print("CVC5 timeout")
-        return None, None, None
+        return None, None, None, None
     except Exception as e:
         print(f"Error: {e}")
-        return None, None, None
+        return None, None, None, None
 
 def build_uniqueness_smt(constraints, n_cells, solution, given_set):
     """Build SMT model to check if given_set uniquely determines solution.
@@ -303,11 +314,20 @@ def generate_base_puzzles_for_task(task_args):
     # Create unique RNG for this task
     task_seed = seed_base + n * 1000 + base_idx * 100
     rng = random.Random(task_seed)
-    topology_seed = task_seed if varied_topologies else None
+    # Namespace topology away from the puzzle/solution RNG stream so layout
+    # orientation is not deterministically coupled to cell content.
+    topology_seed = (
+        (task_seed ^ 0xA5A5A5A5) & 0x7FFFFFFF if varied_topologies else None
+    )
+    hex_coords = (
+        get_hex_coords(n, topology_seed=topology_seed)
+        if topology_seed is not None
+        else None
+    )
 
     # Generate initial solution
-    solution, n_cells, constraints = generate_puzzle(
-        n, rng, cvc5_path, topology_seed=topology_seed
+    solution, n_cells, constraints, resolved_coords = generate_puzzle(
+        n, rng, cvc5_path, hex_coords=hex_coords
     )
 
     if not (solution and n_cells and constraints):
@@ -356,10 +376,10 @@ def generate_base_puzzles_for_task(task_args):
         # Default output remains byte-for-byte schema-compatible.  Varied
         # generation records the concrete layout so export_static can rebuild
         # the same constraints instead of falling back to the canonical shape.
-        if topology_seed is not None:
+        # Thread the coords resolved above — do not re-derive from the seed.
+        if resolved_coords is not None and varied_topologies:
             puzzle_record["hex_coords"] = [
-                {"q": q, "r": r}
-                for q, r in get_hex_coords(n, topology_seed=topology_seed)
+                {"q": q, "r": r} for q, r in resolved_coords
             ]
         puzzle_records.append(puzzle_record)
 

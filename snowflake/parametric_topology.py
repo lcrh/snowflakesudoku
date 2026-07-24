@@ -91,13 +91,17 @@ HEX_COORDS_BY_N: Dict[int, List[Tuple[int, int]]] = {
 
 
 def _varied_hex_coords(n: int, rng: random.Random) -> List[Tuple[int, int]]:
-    """Generate a compact random topology with connected meeting constraints.
+    """Generate a connected random topology with meeting-point constraints.
 
     Starting from one hexagon, the second is placed next to it and the third
     completes a three-hexagon meeting point.  Every later hexagon is sampled
     from empty positions that complete at least one additional meeting point.
     Consequently, for n >= 3 the constraint hypergraph stays connected rather
     than degenerating into independent edge-adjacent hexagons.
+
+    No bounding-box or compactness prior is applied, so elongated layouts are
+    possible. Callers that need a covering-grid fit should reject/resample via
+    ``translate_hex_coords``.
     """
     if n < 1:
         raise ValueError(f"n must be positive, got {n}")
