@@ -30,7 +30,7 @@ where = ["."]
 include = ["snowflake*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["snowflake/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

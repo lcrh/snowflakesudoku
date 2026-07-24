@@ -32,3 +32,4 @@ logs/
 
 # Large data files
 data/*.pt
+uv.lock

@@ -88,6 +88,23 @@ python scripts/generate_with_parametric.py \
 
 This generates 5 puzzles with n=4 topology (4 hexagons, 24 cells, 6 constraints).
 
+By default, each size keeps the historical concentric-ring topology. To
+generate a different deterministic connected topology for every base puzzle,
+opt in explicitly:
+
+```bash
+python scripts/generate_with_parametric.py \
+  --n-min 4 \
+  --n-max 8 \
+  --count 20 \
+  --varied-topologies \
+  --output puzzles_varied.json
+```
+
+The varied layouts grow by completing meeting points, so their cross-hexagon
+constraint graph remains connected. The concrete `hex_coords` are stored with
+each generated puzzle and preserved by `export_static.py`.
+
 ### Export to Static JSON
 
 After generating puzzles, export them with embedded topology data so the frontend can render them:
@@ -131,14 +148,18 @@ No manual coordination needed — just pick an n value and the system generates 
 Builds constraint groups for any n value:
 
 ```python
-from snowflake.parametric_topology import build_snowflake, HEX_COORDS_BY_N
+from snowflake.parametric_topology import build_snowflake, get_hex_coords
 
 # Get topology for n=4
 constraints, n_cells = build_snowflake(4)
 # Returns: 24 cells, 6 constraints (4 hexagons + 1 meeting point)
 
 # Get hex coordinates for each hexagon
-hex_coords = HEX_COORDS_BY_N[4]  # [(0,0), (1,-1), (-1,0), (0,-1)]
+hex_coords = get_hex_coords(4)  # historical canonical layout
+
+# Opt into a reproducible varied layout
+varied_coords = get_hex_coords(4, topology_seed=42)
+constraints, n_cells = build_snowflake(4, topology_seed=42)
 ```
 
 Each constraint is a list of cell indices that must contain distinct digits 1–6. Meeting points are detected geometrically by finding vertices where exactly 6 cells converge.

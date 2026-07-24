@@ -9,7 +9,8 @@ and also become constraints.
 """
 
 import math
-from typing import Dict, List, Tuple
+import random
+from typing import Dict, List, Sequence, Tuple
 from dataclasses import dataclass
 
 @dataclass(frozen=True)
@@ -21,6 +22,18 @@ class HexCell:
 
 # Clockwise from NE
 DIRECTIONS = ["NE", "E", "SE", "SW", "W", "NW"]
+
+# Clockwise axial-coordinate neighbors.  Consecutive entries meet the center
+# hexagon at a common vertex, so filling two consecutive neighbors creates one
+# six-cell meeting-point constraint.
+HEX_NEIGHBORS = [
+    (1, 0),
+    (1, -1),
+    (0, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, 1),
+]
 
 def _hex_ring(ring: int) -> List[Tuple[int, int]]:
     """Generate hexagon coordinates for a single ring in concentric hexagonal pattern.
@@ -77,22 +90,178 @@ HEX_COORDS_BY_N: Dict[int, List[Tuple[int, int]]] = {
 }
 
 
-def get_cell_positions(n: int) -> Dict[int, Dict]:
+def _varied_hex_coords(n: int, rng: random.Random) -> List[Tuple[int, int]]:
+    """Generate a compact random topology with connected meeting constraints.
+
+    Starting from one hexagon, the second is placed next to it and the third
+    completes a three-hexagon meeting point.  Every later hexagon is sampled
+    from empty positions that complete at least one additional meeting point.
+    Consequently, for n >= 3 the constraint hypergraph stays connected rather
+    than degenerating into independent edge-adjacent hexagons.
+    """
+    if n < 1:
+        raise ValueError(f"n must be positive, got {n}")
+
+    coords = [(0, 0)]
+    occupied = {(0, 0)}
+    if n == 1:
+        return coords
+
+    orientation = rng.randrange(len(HEX_NEIGHBORS))
+    first = HEX_NEIGHBORS[orientation]
+    coords.append(first)
+    occupied.add(first)
+    if n == 2:
+        return coords
+
+    # The two consecutive neighbors and the origin share a vertex.
+    second = HEX_NEIGHBORS[(orientation + 1) % len(HEX_NEIGHBORS)]
+    coords.append(second)
+    occupied.add(second)
+
+    while len(coords) < n:
+        candidates = set()
+        for q, r in occupied:
+            for dq, dr in HEX_NEIGHBORS:
+                candidate = (q + dq, r + dr)
+                if candidate in occupied:
+                    continue
+
+                cq, cr = candidate
+                # Two adjacent occupied neighbors plus the candidate make a
+                # three-hexagon cluster around one geometric meeting point.
+                if any(
+                    (cq + HEX_NEIGHBORS[i][0],
+                     cr + HEX_NEIGHBORS[i][1]) in occupied
+                    and
+                    (cq + HEX_NEIGHBORS[(i + 1) % 6][0],
+                     cr + HEX_NEIGHBORS[(i + 1) % 6][1]) in occupied
+                    for i in range(6)
+                ):
+                    candidates.add(candidate)
+
+        if not candidates:  # Defensive: triangle-connected growth should not stall.
+            raise RuntimeError(
+                f"unable to extend varied topology after {len(coords)} hexagons"
+            )
+        chosen = rng.choice(sorted(candidates))
+        coords.append(chosen)
+        occupied.add(chosen)
+
+    return coords
+
+
+def get_hex_coords(
+    n: int,
+    *,
+    topology_seed: int | None = None,
+) -> List[Tuple[int, int]]:
+    """Return the hexagon coordinates for an ``n``-hexagon topology.
+
+    With no ``topology_seed`` this returns the historical concentric-ring
+    topology exactly.  Supplying a seed opts into a deterministic varied
+    topology; different seeds can produce different connected layouts.
+    """
+    if n not in HEX_COORDS_BY_N:
+        raise NotImplementedError(
+            f"n={n} not supported. Available: {sorted(HEX_COORDS_BY_N)}"
+        )
+    if topology_seed is None:
+        return list(HEX_COORDS_BY_N[n])
+    return _varied_hex_coords(n, random.Random(topology_seed))
+
+
+def translate_hex_coords(
+    hex_coords: Sequence[Tuple[int, int]],
+    *,
+    q_min: int,
+    q_max: int,
+    r_min: int,
+    r_max: int,
+) -> List[Tuple[int, int]]:
+    """Translate a topology so every hexagon lies inside an axial bounding box.
+
+    Prefers the translation that keeps the centroid as close to the origin as
+    possible.  Raises ``ValueError`` if no translation fits.
+    """
+    coords = [(int(q), int(r)) for q, r in hex_coords]
+    if not coords:
+        return []
+
+    qs = [q for q, _ in coords]
+    rs = [r for _, r in coords]
+    dq_lo = q_min - min(qs)
+    dq_hi = q_max - max(qs)
+    dr_lo = r_min - min(rs)
+    dr_hi = r_max - max(rs)
+    if dq_lo > dq_hi or dr_lo > dr_hi:
+        raise ValueError(
+            f"topology with bbox q=[{min(qs)},{max(qs)}] r=[{min(rs)},{max(rs)}] "
+            f"cannot fit in q=[{q_min},{q_max}] r=[{r_min},{r_max}]"
+        )
+
+    best = None
+    best_key = None
+    for dq in range(dq_lo, dq_hi + 1):
+        for dr in range(dr_lo, dr_hi + 1):
+            shifted = [(q + dq, r + dr) for q, r in coords]
+            mean_q = sum(q for q, _ in shifted) / len(shifted)
+            mean_r = sum(r for _, r in shifted) / len(shifted)
+            key = (mean_q * mean_q + mean_r * mean_r, abs(dq) + abs(dr), dq, dr)
+            if best_key is None or key < best_key:
+                best_key = key
+                best = shifted
+    assert best is not None
+    return best
+
+
+def _resolve_hex_coords(
+    n: int,
+    hex_coords: Sequence[Tuple[int, int]] | None,
+    topology_seed: int | None,
+) -> List[Tuple[int, int]]:
+    if hex_coords is not None and topology_seed is not None:
+        raise ValueError("pass either hex_coords or topology_seed, not both")
+    if hex_coords is None:
+        return get_hex_coords(n, topology_seed=topology_seed)
+
+    resolved = [(int(q), int(r)) for q, r in hex_coords]
+    if len(resolved) != n:
+        raise ValueError(
+            f"hex_coords must contain exactly n={n} coordinates, got {len(resolved)}"
+        )
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("hex_coords must not contain duplicates")
+    return resolved
+
+
+def get_cell_positions(
+    n: int,
+    hex_coords: Sequence[Tuple[int, int]] | None = None,
+    *,
+    topology_seed: int | None = None,
+) -> Dict[int, Dict]:
     """Return {cell_idx: {q, r, direction}} for rendering each cell as a triangle.
 
     Cells are indexed in hex-major order: all 6 cells of hexagon 0,
     then all 6 of hexagon 1, etc.
     """
+    resolved_coords = _resolve_hex_coords(n, hex_coords, topology_seed)
     positions = {}
     idx = 0
-    for q, r in HEX_COORDS_BY_N[n]:
+    for q, r in resolved_coords:
         for direction in DIRECTIONS:
             positions[idx] = {"q": q, "r": r, "direction": direction}
             idx += 1
     return positions
 
 
-def build_snowflake(n: int) -> Tuple[List[List[int]], int]:
+def build_snowflake(
+    n: int,
+    hex_coords: Sequence[Tuple[int, int]] | None = None,
+    *,
+    topology_seed: int | None = None,
+) -> Tuple[List[List[int]], int]:
     """Build constraints and cell count for a snowflake with n hexagons.
 
     Returns:
@@ -100,10 +269,7 @@ def build_snowflake(n: int) -> Tuple[List[List[int]], int]:
                      that must all contain distinct digits 1-6.
         n_cells:     total number of cells (n * 6).
     """
-    if n not in HEX_COORDS_BY_N:
-        raise NotImplementedError(f"n={n} not supported. Available: {sorted(HEX_COORDS_BY_N)}")
-
-    hex_coords = HEX_COORDS_BY_N[n]
+    resolved_coords = _resolve_hex_coords(n, hex_coords, topology_seed)
 
     # Build cell index map
     # Each cell is indexed uniquely by (hexagon_q, hexagon_r, direction)
@@ -113,7 +279,7 @@ def build_snowflake(n: int) -> Tuple[List[List[int]], int]:
     next_idx = 0
 
     # For each hexagon, add its 6 cells
-    for q, r in hex_coords:
+    for q, r in resolved_coords:
         for direction in DIRECTIONS:
             cell = HexCell(q, r, direction)
             cell_to_idx[cell] = next_idx
@@ -125,7 +291,7 @@ def build_snowflake(n: int) -> Tuple[List[List[int]], int]:
     # Build hexagon constraints
     # Each hexagon at (q, r) has 6 cells (one in each direction)
     constraints = []
-    for q, r in hex_coords:
+    for q, r in resolved_coords:
         hexagon_cells = []
         for direction in DIRECTIONS:
             cell = HexCell(q, r, direction)
