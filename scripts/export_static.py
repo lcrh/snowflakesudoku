@@ -27,6 +27,15 @@ def export(input_path: Path, output_path: Path) -> None:
     with open(input_path) as f:
         raw = json.load(f)
 
+    has_hex = [("hex_coords" in p) for p in raw]
+    if any(has_hex) and not all(has_hex):
+        missing = [i for i, ok in enumerate(has_hex) if not ok]
+        raise ValueError(
+            "input mixes records with and without hex_coords; "
+            f"missing on indices {missing[:10]}"
+            + ("..." if len(missing) > 10 else "")
+        )
+
     puzzles = []
     for i, p in enumerate(raw):
         n = p["n"]

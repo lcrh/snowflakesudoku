@@ -173,7 +173,7 @@ class TestVariedTopologies:
     """Test deterministic opt-in topology variation."""
 
     def test_default_calls_keep_canonical_topology(self):
-        for n in [1, 4, 8, 13]:
+        for n in HEX_COORDS_BY_N:
             assert get_hex_coords(n) == HEX_COORDS_BY_N[n]
             assert get_cell_positions(n) == get_cell_positions(
                 n, HEX_COORDS_BY_N[n]
@@ -194,21 +194,28 @@ class TestVariedTopologies:
         )
 
     def test_seeds_produce_varied_layouts(self):
-        layouts = {
-            tuple(get_hex_coords(8, topology_seed=seed))
-            for seed in range(20)
-        }
-        assert len(layouts) > 1
-        assert all(len(layout) == 8 for layout in layouts)
-        assert all(len(set(layout)) == 8 for layout in layouts)
+        # Small orders have few polyhexes; pin the observed shape counts so a
+        # sampler regression is visible. Larger orders just need diversity.
+        expected_min_shapes = {4: 3, 5: 6, 8: 10}
+        for n, min_shapes in expected_min_shapes.items():
+            layouts = {
+                tuple(get_hex_coords(n, topology_seed=seed))
+                for seed in range(40)
+            }
+            assert len(layouts) >= min_shapes
+            assert all(len(layout) == n for layout in layouts)
+            assert all(len(set(layout)) == n for layout in layouts)
 
     def test_varied_constraint_hypergraph_is_connected(self):
         for n in [3, 4, 8, 13]:
             for seed in range(10):
                 constraints, _ = build_snowflake(n, topology_seed=seed)
                 adjacency = {hex_idx: set() for hex_idx in range(n)}
-                for group in constraints[n:]:
+                # Meeting points span >1 hexagon; do not rely on constraint order.
+                for group in constraints:
                     hexagons = {cell_idx // 6 for cell_idx in group}
+                    if len(hexagons) < 2:
+                        continue
                     for left in hexagons:
                         adjacency[left].update(hexagons - {left})
 
@@ -241,18 +248,34 @@ class TestVariedTopologies:
             )
 
     def test_translate_hex_coords_fits_covering_box(self):
-        for seed in range(20):
-            coords = get_hex_coords(8, topology_seed=seed)
-            fitted = translate_hex_coords(
-                coords, q_min=-2, q_max=2, r_min=-2, r_max=2
+        for n in range(4, 9):
+            for seed in range(40):
+                coords = get_hex_coords(n, topology_seed=seed)
+                fitted = translate_hex_coords(
+                    coords, q_min=-2, q_max=2, r_min=-2, r_max=2
+                )
+                assert len(fitted) == n
+                assert all(-2 <= q <= 2 and -2 <= r <= 2 for q, r in fitted)
+                # Relative geometry is preserved.
+                origin = set(
+                    (q - coords[0][0], r - coords[0][1]) for q, r in coords
+                )
+                fitted_origin = set(
+                    (q - fitted[0][0], r - fitted[0][1]) for q, r in fitted
+                )
+                assert origin == fitted_origin
+
+    def test_translate_hex_coords_rejects_oversized_layout(self):
+        # A 6-hex strip is wider than the 5x5 covering box.
+        strip = [(i, 0) for i in range(6)]
+        with pytest.raises(ValueError, match="cannot fit"):
+            translate_hex_coords(
+                strip, q_min=-2, q_max=2, r_min=-2, r_max=2
             )
-            assert len(fitted) == 8
-            assert all(-2 <= q <= 2 and -2 <= r <= 2 for q, r in fitted)
-            # Relative geometry is preserved.
-            origin = set(
-                (q - coords[0][0], r - coords[0][1]) for q, r in coords
-            )
-            fitted_origin = set(
-                (q - fitted[0][0], r - fitted[0][1]) for q, r in fitted
-            )
-            assert origin == fitted_origin
+
+    def test_build_snowflake_invariant_under_translation(self):
+        coords = get_hex_coords(8, topology_seed=7)
+        fitted = translate_hex_coords(
+            coords, q_min=-2, q_max=2, r_min=-2, r_max=2
+        )
+        assert build_snowflake(8, coords) == build_snowflake(8, fitted)
