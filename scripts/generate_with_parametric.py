@@ -11,7 +11,7 @@ from multiprocessing import Pool
 
 # Import parametric topology
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from snowflake.parametric_topology import build_snowflake
+from snowflake.parametric_topology import build_snowflake, get_hex_coords
 
 def generate_puzzle_code(rng):
     """Generate a 3-character alphanumeric puzzle code."""
@@ -63,14 +63,14 @@ def parse_model(output, n_cells):
 
     return solution
 
-def generate_puzzle(n, rng, cvc5_path):
+def generate_puzzle(n, rng, cvc5_path, topology_seed=None):
     """Generate a single valid puzzle using CVC5 and parametric topology.
 
     Returns (solution, n_cells, constraints) or (None, None, None) on failure.
     """
 
     print(f"Building topology for n={n}...")
-    constraints, n_cells = build_snowflake(n)
+    constraints, n_cells = build_snowflake(n, topology_seed=topology_seed)
 
     print(f"  Cells: {n_cells}, Constraints: {len(constraints)}")
     print(f"Generating SMT model...")
@@ -292,18 +292,23 @@ def generate_base_puzzles_for_task(task_args):
     and creates multiple variants with different difficulties.
 
     Args:
-        task_args: (n, base_idx, seed_base, cvc5_path, num_variants)
+        task_args: (n, base_idx, seed_base, cvc5_path, num_variants,
+                    varied_topologies)
 
     Returns:
         List of puzzle records (base puzzle + all variants)
     """
-    n, base_idx, seed_base, cvc5_path, num_variants = task_args
+    n, base_idx, seed_base, cvc5_path, num_variants, varied_topologies = task_args
 
     # Create unique RNG for this task
-    rng = random.Random(seed_base + n * 1000 + base_idx * 100)
+    task_seed = seed_base + n * 1000 + base_idx * 100
+    rng = random.Random(task_seed)
+    topology_seed = task_seed if varied_topologies else None
 
     # Generate initial solution
-    solution, n_cells, constraints = generate_puzzle(n, rng, cvc5_path)
+    solution, n_cells, constraints = generate_puzzle(
+        n, rng, cvc5_path, topology_seed=topology_seed
+    )
 
     if not (solution and n_cells and constraints):
         return []
@@ -348,6 +353,14 @@ def generate_base_puzzles_for_task(task_args):
             "solution": solution,
             "givens": givens
         }
+        # Default output remains byte-for-byte schema-compatible.  Varied
+        # generation records the concrete layout so export_static can rebuild
+        # the same constraints instead of falling back to the canonical shape.
+        if topology_seed is not None:
+            puzzle_record["hex_coords"] = [
+                {"q": q, "r": r}
+                for q, r in get_hex_coords(n, topology_seed=topology_seed)
+            ]
         puzzle_records.append(puzzle_record)
 
     return puzzle_records
@@ -364,6 +377,14 @@ if __name__ == "__main__":
     parser.add_argument("--cvc5", type=str, default="cvc5", help="Path to CVC5 binary (default: assume on PATH)")
     parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers (default: 4)")
     parser.add_argument("--force", action="store_true", help="Force regeneration even if output file exists")
+    parser.add_argument(
+        "--varied-topologies",
+        action="store_true",
+        help=(
+            "Generate a deterministic varied connected layout for each base "
+            "puzzle. Omit to preserve the canonical topology for every n."
+        ),
+    )
     args = parser.parse_args()
 
     # Check if output file already exists
@@ -383,13 +404,22 @@ if __name__ == "__main__":
     print(f"Base puzzles: {args.count} per size")
     print(f"Variants per base: {args.variants} (minimal + harder versions)")
     print(f"Parallel workers: {args.workers}")
+    print(f"Varied topologies: {'ON' if args.varied_topologies else 'OFF'}")
     print(f"Uniqueness guarantee: ON (iterative progressive removal with CVC5 checking)\n")
 
-    # Create list of all tasks: (n, base_idx, seed_base, cvc5_path, num_variants)
+    # Create list of all tasks: (n, base_idx, seed_base, cvc5_path,
+    #                            num_variants, varied_topologies)
     tasks = []
     for n in range(args.n_min, args.n_max + 1):
         for base_idx in range(args.count):
-            tasks.append((n, base_idx, args.seed, args.cvc5, args.variants))
+            tasks.append((
+                n,
+                base_idx,
+                args.seed,
+                args.cvc5,
+                args.variants,
+                args.varied_topologies,
+            ))
 
     print(f"Total tasks: {len(tasks)} (puzzles to generate)")
     print(f"Estimated final count: {len(tasks) * args.variants} (with variants)\n")

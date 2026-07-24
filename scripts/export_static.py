@@ -16,7 +16,11 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from snowflake.parametric_topology import build_snowflake, HEX_COORDS_BY_N, get_cell_positions
+from snowflake.parametric_topology import (
+    build_snowflake,
+    get_cell_positions,
+    get_hex_coords,
+)
 
 
 def export(input_path: Path, output_path: Path) -> None:
@@ -26,9 +30,15 @@ def export(input_path: Path, output_path: Path) -> None:
     puzzles = []
     for i, p in enumerate(raw):
         n = p["n"]
-        constraints, n_cells = build_snowflake(n)
-        hex_coords = HEX_COORDS_BY_N[n]
-        cell_positions = get_cell_positions(n)
+        if "hex_coords" in p:
+            hex_coords = [
+                (int(coord["q"]), int(coord["r"]))
+                for coord in p["hex_coords"]
+            ]
+        else:
+            hex_coords = get_hex_coords(n)
+        constraints, n_cells = build_snowflake(n, hex_coords)
+        cell_positions = get_cell_positions(n, hex_coords)
 
         puzzle_record = {
             "id": i,

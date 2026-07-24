@@ -4,6 +4,8 @@ import pytest
 from snowflake.parametric_topology import (
     build_snowflake,
     get_cell_positions,
+    get_hex_coords,
+    translate_hex_coords,
     HEX_COORDS_BY_N,
     _hex_ring,
     _hex_coords_up_to_n,
@@ -165,3 +167,92 @@ class TestNonRegressions:
             assert n_cells == expected_cells, f"n={n}: expected {expected_cells} cells, got {n_cells}"
             assert len(constraints) == expected_constraints, \
                 f"n={n}: expected {expected_constraints} constraints, got {len(constraints)}"
+
+
+class TestVariedTopologies:
+    """Test deterministic opt-in topology variation."""
+
+    def test_default_calls_keep_canonical_topology(self):
+        for n in [1, 4, 8, 13]:
+            assert get_hex_coords(n) == HEX_COORDS_BY_N[n]
+            assert get_cell_positions(n) == get_cell_positions(
+                n, HEX_COORDS_BY_N[n]
+            )
+            assert build_snowflake(n) == build_snowflake(
+                n, HEX_COORDS_BY_N[n]
+            )
+
+    def test_seeded_topology_is_deterministic(self):
+        assert get_hex_coords(8, topology_seed=42) == get_hex_coords(
+            8, topology_seed=42
+        )
+        assert build_snowflake(8, topology_seed=42) == build_snowflake(
+            8, topology_seed=42
+        )
+        assert get_cell_positions(8, topology_seed=42) == get_cell_positions(
+            8, topology_seed=42
+        )
+
+    def test_seeds_produce_varied_layouts(self):
+        layouts = {
+            tuple(get_hex_coords(8, topology_seed=seed))
+            for seed in range(20)
+        }
+        assert len(layouts) > 1
+        assert all(len(layout) == 8 for layout in layouts)
+        assert all(len(set(layout)) == 8 for layout in layouts)
+
+    def test_varied_constraint_hypergraph_is_connected(self):
+        for n in [3, 4, 8, 13]:
+            for seed in range(10):
+                constraints, _ = build_snowflake(n, topology_seed=seed)
+                adjacency = {hex_idx: set() for hex_idx in range(n)}
+                for group in constraints[n:]:
+                    hexagons = {cell_idx // 6 for cell_idx in group}
+                    for left in hexagons:
+                        adjacency[left].update(hexagons - {left})
+
+                seen = {0}
+                frontier = [0]
+                while frontier:
+                    current = frontier.pop()
+                    new = adjacency[current] - seen
+                    seen.update(new)
+                    frontier.extend(new)
+                assert seen == set(range(n))
+
+    def test_explicit_coords_drive_constraints_and_positions(self):
+        coords = [(0, 0), (1, -1), (0, -1), (1, 0)]
+        constraints, n_cells = build_snowflake(4, coords)
+        positions = get_cell_positions(4, coords)
+        assert n_cells == 24
+        assert len(constraints) == 6
+        assert {
+            (position["q"], position["r"])
+            for position in positions.values()
+        } == set(coords)
+
+    def test_explicit_coords_and_seed_are_mutually_exclusive(self):
+        with pytest.raises(ValueError, match="either hex_coords or topology_seed"):
+            build_snowflake(
+                1,
+                [(0, 0)],
+                topology_seed=1,
+            )
+
+    def test_translate_hex_coords_fits_covering_box(self):
+        for seed in range(20):
+            coords = get_hex_coords(8, topology_seed=seed)
+            fitted = translate_hex_coords(
+                coords, q_min=-2, q_max=2, r_min=-2, r_max=2
+            )
+            assert len(fitted) == 8
+            assert all(-2 <= q <= 2 and -2 <= r <= 2 for q, r in fitted)
+            # Relative geometry is preserved.
+            origin = set(
+                (q - coords[0][0], r - coords[0][1]) for q, r in coords
+            )
+            fitted_origin = set(
+                (q - fitted[0][0], r - fitted[0][1]) for q, r in fitted
+            )
+            assert origin == fitted_origin
